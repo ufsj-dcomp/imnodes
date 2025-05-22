@@ -28,6 +28,7 @@ typedef int ImNodesUIState;
 typedef int ImNodesClickInteractionType;
 typedef int ImNodesLinkCreationType;
 
+
 enum ImNodesScope_
 {
     ImNodesScope_None = 1,
@@ -40,7 +41,8 @@ enum ImNodesAttributeType_
 {
     ImNodesAttributeType_None,
     ImNodesAttributeType_Input,
-    ImNodesAttributeType_Output
+    ImNodesAttributeType_Output,
+    ImNodesAttributeType_InputOutput
 };
 
 enum ImNodesUIState_
@@ -67,6 +69,7 @@ enum ImNodesLinkCreationType_
     ImNodesLinkCreationType_Standard,
     ImNodesLinkCreationType_FromDetach
 };
+
 
 // [SECTION] internal data structures
 
@@ -147,6 +150,7 @@ struct ImNodeData
         float  CornerRounding;
         ImVec2 Padding;
         float  BorderThickness;
+        unsigned char   IsCircle;
     } LayoutStyle;
 
     ImVector<int> PinIndices;
@@ -189,13 +193,15 @@ struct ImLinkData
 {
     int Id;
     int StartPinIdx, EndPinIdx;
+    ImNodesLinkSign Sign;
+    char Name[64];
 
     struct
     {
         ImU32 Base, Hovered, Selected;
     } ColorStyle;
 
-    ImLinkData(const int link_id) : Id(link_id), StartPinIdx(), EndPinIdx(), ColorStyle() {}
+    ImLinkData(const int link_id) : Id(link_id), StartPinIdx(), EndPinIdx(), Sign(), ColorStyle() {}
 };
 
 struct ImClickInteractionState
@@ -258,6 +264,12 @@ struct ImNodesEditorContext
     ImObjectPool<ImNodeData> Nodes;
     ImObjectPool<ImPinData>  Pins;
     ImObjectPool<ImLinkData> Links;
+    
+    ImOptionalIndex PendingLinkForSignSelection; 
+    ImNodesLinkSign PendingLinkSign = ImNodesLinkSign_None;
+
+    ImOptionalIndex LinkForNaming; 
+    char LinkNameBuffer[64];
 
     ImVector<int> NodeDepthOrder;
 

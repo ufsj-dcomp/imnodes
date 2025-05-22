@@ -11,7 +11,9 @@
 // [SECTION] API implementation
 
 #include "imnodes.h"
+#include "imgui.h"
 #include "imnodes_internal.h"
+#include <cinttypes>
 
 #define IMGUI_DEFINE_MATH_OPERATORS
 #include <imgui_internal.h>
@@ -121,19 +123,41 @@ inline CubicBezier GetCubicBezier(
     const float                line_segments_per_length)
 {
     assert(
-        (start_type == ImNodesAttributeType_Input) || (start_type == ImNodesAttributeType_Output));
-    if (start_type == ImNodesAttributeType_Input)
+        (start_type == ImNodesAttributeType_Input) || (start_type == ImNodesAttributeType_Output) || (start_type == ImNodesAttributeType_InputOutput));
+    if (start_type == ImNodesAttributeType_Input) // || start_type == ImNodesAttributeType_InputOutput)
     {
         ImSwap(start, end);
     }
 
     const float  link_length = ImSqrt(ImLengthSqr(end - start));
     const ImVec2 offset = ImVec2(0.25f * link_length, 0.f);
+
     CubicBezier  cubic_bezier;
-    cubic_bezier.P0 = start;
-    cubic_bezier.P1 = start + offset;
-    cubic_bezier.P2 = end - offset;
-    cubic_bezier.P3 = end;
+    if (abs(start.x - end.x) < 15.0 && start.y <= end.y){
+        cubic_bezier.P0 = start;
+        cubic_bezier.P1 = ImVec2(start.x,start.y + offset.y);
+        cubic_bezier.P2 = ImVec2(end.x,end.y - offset.y);
+        cubic_bezier.P3 = end;
+    }
+    else if (abs(start.x - end.x) < 15.0 && start.y > end.y){
+        cubic_bezier.P0 = start;
+        cubic_bezier.P1 = ImVec2(start.x,start.y - offset.y);
+        cubic_bezier.P2 = ImVec2(end.x,end.y + offset.y);
+        cubic_bezier.P3 = end;
+    }
+    else if (start.x < end.x) {
+        cubic_bezier.P0 = start;
+        cubic_bezier.P1 = start + offset;
+        cubic_bezier.P2 = end - offset;
+        cubic_bezier.P3 = end;
+    }
+    else {
+        cubic_bezier.P0 = start;
+        cubic_bezier.P1 = start - offset;
+        cubic_bezier.P2 = end + offset;
+        cubic_bezier.P3 = end;
+    }
+
     cubic_bezier.NumSegments = ImMax(static_cast<int>(link_length * line_segments_per_length), 1);
     return cubic_bezier;
 }
@@ -640,19 +664,61 @@ static void DrawListTransformChannels(
 ImVec2 GetPinCoordinates(
     const ImRect&              node_rect,
     const ImRect&              attribute_rect,
-    const ImNodesAttributeType type)
-{
-    assert(type == ImNodesAttributeType_Input || type == ImNodesAttributeType_Output);
-    const float x = type == ImNodesAttributeType_Input
-                        ? (node_rect.Min.x - GImNodes->Style.PinOffset)
-                        : (node_rect.Max.x + GImNodes->Style.PinOffset);
-    return ImVec2(x, 0.5f * (attribute_rect.Min.y + attribute_rect.Max.y));
+    const ImNodesAttributeType type,
+    const ImPinData& pin
+    )
+
+    {
+    ImNodesEditorContext& editor = EditorContextGet();
+
+    if(editor.Nodes.Pool[pin.ParentNodeIdx].LayoutStyle.IsCircle)
+    {
+        const ImRect& parent_node_rect = editor.Nodes.Pool[pin.ParentNodeIdx].Rect;
+        float radius = parent_node_rect.GetWidth() + 5 / 2.0f;
+        ImVec2 center = parent_node_rect.GetCenter();
+
+        const float angle_step = 2.0f * IM_PI / 8.0f;
+        const float angle = angle_step * pin.Id;
+        
+        return ImVec2(
+            center.x + radius * cosf(angle),
+            center.y + radius * sinf(angle)
+        );
+
+        
+    } else {
+        // assert(type == ImNodesAttributeType_Input || type == ImNodesAttributeType_Output);
+        // const float x = type == ImNodesAttributeType_Input
+        //                     ? (node_rect.Min.x - GImNodes->Style.PinOffset)
+        //                     : (node_rect.Max.x + GImNodes->Style.PinOffset);
+        // return ImVec2(x, 0.5f * (attribute_rect.Min.y + attribute_rect.Max.y));
+
+        if (type == ImNodesAttributeType_Input)
+        {
+            return ImVec2(
+                node_rect.Min.x - GImNodes->Style.PinOffset,
+                0.5f * (attribute_rect.Min.y + attribute_rect.Max.y));
+        }
+        else if (type == ImNodesAttributeType_Output)
+        {
+            return ImVec2(
+                node_rect.Max.x + GImNodes->Style.PinOffset,
+                0.5f * (attribute_rect.Min.y + attribute_rect.Max.y));
+        }
+        else 
+        {  //topo teste
+            return ImVec2(
+                0.5f * (node_rect.Min.x + node_rect.Max.x),
+                node_rect.Min.y - GImNodes->Style.PinOffset);
+        }
+    }
+    }
 }
 
 ImVec2 GetPinCoordinates(const ImNodesEditorContext& editor, const ImPinData& pin)
 {
     const ImRect& parent_node_rect = editor.Nodes.Pool[pin.ParentNodeIdx].Rect;
-    return GetPinCoordinates(parent_node_rect, pin.AttributeRect, pin.Type);
+    return GetPinCoordinates(parent_node_rect, pin.AttributeRect, pin.Type, pin);
 }
 
 bool MouseInCanvas()
@@ -853,15 +919,16 @@ void BoxSelectorUpdateSelection(ImNodesEditorContext& editor, ImRect box_rect)
             const ImRect&    node_end_rect = editor.Nodes.Pool[pin_end.ParentNodeIdx].Rect;
 
             const ImVec2 start = GetPinCoordinates(
-                node_start_rect, pin_start.AttributeRect, pin_start.Type);
+                node_start_rect, pin_start.AttributeRect, pin_start.Type, pin_start);
             const ImVec2 end =
-                GetPinCoordinates(node_end_rect, pin_end.AttributeRect, pin_end.Type);
+                GetPinCoordinates(node_end_rect, pin_end.AttributeRect, pin_end.Type, pin_end);
 
             // Test
             if (RectangleOverlapsLink(box_rect, start, end, pin_start.Type))
             {
                 editor.SelectedLinkIndices.push_back(link_idx);
             }
+            
         }
     }
 }
@@ -946,8 +1013,26 @@ bool ShouldLinkSnapToPin(
         return false;
     }
 
-    // The end pin must be of a different type
-    if (start_pin.Type == end_pin.Type)
+    // // The end pin must be of a different type
+    // if (start_pin.Type == end_pin.Type)
+    // {
+    //     return false;
+    // }
+
+    // - Input can connect to Output or InputOutput
+    // - Output can connect to Input  or InputOutput
+    // - InputOutput can connect to Input  or Output
+
+    bool type_compatible = 
+        (start_pin.Type == ImNodesAttributeType_Input && 
+         (end_pin.Type == ImNodesAttributeType_Output || end_pin.Type == ImNodesAttributeType_InputOutput)) ||
+        (start_pin.Type == ImNodesAttributeType_Output && 
+         (end_pin.Type == ImNodesAttributeType_Input || end_pin.Type == ImNodesAttributeType_InputOutput)) ||
+        (start_pin.Type == ImNodesAttributeType_InputOutput && 
+         (end_pin.Type == ImNodesAttributeType_Input || end_pin.Type == ImNodesAttributeType_Output || 
+            end_pin.Type == ImNodesAttributeType_InputOutput));
+
+    if (!type_compatible)
     {
         return false;
     }
@@ -1225,11 +1310,19 @@ ImOptionalIndex ResolveHoveredPin(
         }
     }
 
+    // if (pin_idx_with_smallest_distance.HasValue()) {
+    //     ImGui::Text("Pino hovered: %d", pin_idx_with_smallest_distance.Value());
+    // }
+
     return pin_idx_with_smallest_distance;
 }
 
 ImOptionalIndex ResolveHoveredNode(const ImVector<int>& depth_stack)
-{
+{   if (GImNodes->HoveredPinIdx.HasValue())
+    {
+        return ImOptionalIndex(); 
+    }
+
     if (GImNodes->NodeIndicesOverlappingWithMouse.size() == 0)
     {
         return ImOptionalIndex();
@@ -1257,6 +1350,7 @@ ImOptionalIndex ResolveHoveredNode(const ImVector<int>& depth_stack)
     }
 
     assert(node_idx_on_top != -1);
+    
     return ImOptionalIndex(node_idx_on_top);
 }
 
@@ -1429,6 +1523,16 @@ void DrawPinShape(const ImVec2& pin_pos, const ImPinData& pin, const ImU32 pin_c
 {
     static const int CIRCLE_NUM_SEGMENTS = 8;
 
+    /*if (pin.Type == ImNodesAttributeType_InputOutput)
+    {
+        const float side = GImNodes->Style.PinQuadSideLength;
+        GImNodes->CanvasDrawList->AddRectFilled(
+            pin_pos - ImVec2(side * 0.5f, side * 0.5f),
+            pin_pos + ImVec2(side * 0.5f, side * 0.5f),
+            pin_color);
+        return;
+    }*/
+
     switch (pin.Shape)
     {
     case ImNodesPinShape_Circle:
@@ -1461,13 +1565,23 @@ void DrawPinShape(const ImVec2& pin_pos, const ImPinData& pin, const ImU32 pin_c
     break;
     case ImNodesPinShape_QuadFilled:
     {
-        const QuadOffsets offset = CalculateQuadOffsets(GImNodes->Style.PinQuadSideLength);
-        GImNodes->CanvasDrawList->AddQuadFilled(
-            pin_pos + offset.TopLeft,
-            pin_pos + offset.BottomLeft,
-            pin_pos + offset.BottomRight,
-            pin_pos + offset.TopRight,
-            pin_color);
+        if (pin.Type == ImNodesAttributeType_InputOutput)
+        {
+            const float side = GImNodes->Style.PinQuadSideLength;
+            GImNodes->CanvasDrawList->AddRectFilled(
+                pin_pos - ImVec2(side * 0.5f, side * 0.5f),
+                pin_pos + ImVec2(side * 0.5f, side * 0.5f),
+                pin_color);
+        }
+        else {
+            const QuadOffsets offset = CalculateQuadOffsets(GImNodes->Style.PinQuadSideLength);
+            GImNodes->CanvasDrawList->AddQuadFilled(
+                pin_pos + offset.TopLeft,
+                pin_pos + offset.BottomLeft,
+                pin_pos + offset.BottomRight,
+                pin_pos + offset.TopRight,
+                pin_color);
+        }
     }
     break;
     case ImNodesPinShape_Triangle:
@@ -1507,14 +1621,19 @@ void DrawPin(ImNodesEditorContext& editor, const int pin_idx)
 {
     ImPinData&    pin = editor.Pins.Pool[pin_idx];
     const ImRect& parent_node_rect = editor.Nodes.Pool[pin.ParentNodeIdx].Rect;
+    ImNodeData& parent_node = editor.Nodes.Pool[pin.ParentNodeIdx];
 
-    pin.Pos = GetPinCoordinates(parent_node_rect, pin.AttributeRect, pin.Type);
+    
+    pin.Pos = GetPinCoordinates(parent_node_rect, pin.AttributeRect, pin.Type, pin);
+    
 
     ImU32 pin_color = pin.ColorStyle.Background;
 
     if (GImNodes->HoveredPinIdx == pin_idx)
     {
-        pin_color = pin.ColorStyle.Hovered;
+        // pin_color = pin.ColorStyle.Hovered;
+        pin_color = IM_COL32(255, 0, 0, 255);
+
     }
 
     DrawPinShape(pin.Pos, pin, pin_color);
@@ -1543,6 +1662,21 @@ void DrawNode(ImNodesEditorContext& editor, const int node_idx)
         titlebar_background = node.ColorStyle.TitlebarHovered;
     }
 
+    if (node.LayoutStyle.IsCircle)
+    {
+        const float radius = node.Rect.GetWidth() + 5 * 0.5f;
+        const ImVec2 center = node.Rect.GetCenter();
+
+        GImNodes->CanvasDrawList->AddCircleFilled(center, radius, node_background, 32);
+
+        if ((GImNodes->Style.Flags & ImNodesStyleFlags_NodeOutline) != 0)
+        {
+            GImNodes->CanvasDrawList->AddCircle(center, radius, node.ColorStyle.Outline, 32, node.LayoutStyle.BorderThickness);
+        }
+    }
+
+    else
+    
     {
         // node base
         GImNodes->CanvasDrawList->AddRectFilled(
@@ -1604,7 +1738,87 @@ void DrawNode(ImNodesEditorContext& editor, const int node_idx)
     }
 }
 
-void DrawLink(ImNodesEditorContext& editor, const int link_idx)
+
+void DrawLinkSign(CubicBezier cubic_bezier, ImNodesLinkSign sign, ImPinData start_pin, ImPinData end_pin)
+{
+    const float t_start = 0.1f; 
+    const float t_end = 0.9f;   
+    const float sign_offset = 15.0f;
+    ImVec2 sign_posStart = ImBezierCubicCalc(cubic_bezier.P0, cubic_bezier.P1, cubic_bezier.P2, cubic_bezier.P3, t_start);
+    ImVec2 sign_posEnd = ImBezierCubicCalc(cubic_bezier.P0, cubic_bezier.P1, cubic_bezier.P2, cubic_bezier.P3, t_end);
+
+    bool is_horizontal = fabsf(end_pin.Pos.x - start_pin.Pos.x) > fabsf(end_pin.Pos.y - start_pin.Pos.y);
+    ImGuiIO io = ImGui::GetIO();
+    float font_size = 16.0f;
+
+    if (is_horizontal) {
+        if (sign == ImNodesLinkSign_Negative) {
+            GImNodes->CanvasDrawList->AddText(
+                ImGui::GetDefaultFont(),
+                font_size,
+                ImVec2(sign_posEnd.x, sign_posEnd.y - sign_offset),
+                IM_COL32(0, 255, 0, 255),
+                "-");
+        } 
+        else if (sign == ImNodesLinkSign_Positive) {
+            GImNodes->CanvasDrawList->AddText(
+                ImGui::GetDefaultFont(),
+                font_size,
+                ImVec2(sign_posEnd.x, sign_posEnd.y - sign_offset),
+                IM_COL32(0, 255, 0, 255),
+                "+");
+        } 
+        else if (sign == ImNodesLinkSign_NegToPos) {            
+            GImNodes->CanvasDrawList->AddText( 
+                ImGui::GetDefaultFont(),
+                font_size,
+                ImVec2(sign_posStart.x, sign_posStart.y - sign_offset),
+                IM_COL32(0, 255, 0, 255),
+                "-");
+                
+            GImNodes->CanvasDrawList->AddText(
+                ImGui::GetDefaultFont(),
+                font_size,
+                ImVec2(sign_posEnd.x, sign_posEnd.y - sign_offset),
+                IM_COL32(0, 255, 0, 255),
+                "+");
+        }
+    } else {
+        if (sign == ImNodesLinkSign_Negative) {
+            GImNodes->CanvasDrawList->AddText(
+                ImGui::GetDefaultFont(),
+                font_size,
+                ImVec2(sign_posEnd.x + sign_offset, sign_posEnd.y),
+                IM_COL32(0, 255, 0, 255),
+                "-");
+        } 
+        else if (sign == ImNodesLinkSign_Positive) {
+            GImNodes->CanvasDrawList->AddText(
+                ImGui::GetDefaultFont(),
+                font_size,
+                ImVec2(sign_posEnd.x + sign_offset, sign_posEnd.y),
+                IM_COL32(0, 255, 0, 255),
+                "+");
+        } 
+        else if (sign == ImNodesLinkSign_NegToPos) {            
+            GImNodes->CanvasDrawList->AddText( 
+                ImGui::GetDefaultFont(),
+                font_size,
+                ImVec2(sign_posStart.x + sign_offset, sign_posStart.y),
+                IM_COL32(0, 255, 0, 255),
+                "-");
+                
+            GImNodes->CanvasDrawList->AddText(
+                ImGui::GetDefaultFont(),
+                font_size,
+                ImVec2(sign_posEnd.x + sign_offset, sign_posEnd.y),
+                IM_COL32(0, 255, 0, 255),
+                "+");
+        }
+    }
+}
+
+void DrawLink(ImNodesEditorContext& editor, const int link_idx, ImNodesLinkSign sign)
 {
     const ImLinkData& link = editor.Links.Pool[link_idx];
     const ImPinData&  start_pin = editor.Pins.Pool[link.StartPinIdx];
@@ -1654,7 +1868,56 @@ void DrawLink(ImNodesEditorContext& editor, const int link_idx)
         link_color,
         GImNodes->Style.LinkThickness,
         cubic_bezier.NumSegments);
+
+    
+    if (link.Name[0] != '\0')
+    {
+        // Calcular posição central (t = 0.5)
+        ImVec2 center_pos = ImBezierCubicCalc(
+            cubic_bezier.P0, cubic_bezier.P1, cubic_bezier.P2, cubic_bezier.P3, 0.5f);
+        
+        // Calcular tamanho do texto
+        ImVec2 text_size = ImGui::CalcTextSize(link.Name);
+        ImVec2 text_pos = center_pos - text_size * 0.5f;
+        
+        // Desenhar fundo para melhor legibilidade
+        const float padding = 2.0f;
+        const float rounding = 3.0f;
+        const ImU32 bg_color = IM_COL32(0, 0, 0, 150);
+        GImNodes->CanvasDrawList->AddRectFilled(
+            text_pos - ImVec2(padding, padding), 
+            text_pos + text_size + ImVec2(padding, padding), 
+            bg_color, 
+            rounding);
+        
+        // Desenhar o texto
+        const ImU32 text_color = IM_COL32(255, 255, 255, 255);
+        GImNodes->CanvasDrawList->AddText(
+            text_pos, 
+            text_color, 
+            link.Name);
+    }
+
+
+    ImVec2 b = end_pin.Pos - start_pin.Pos;
+    double angle = atan2(b.y, b.x);
+    const double triangleLenght = 10;
+    double center_x = end_pin.Pos.x - cos(angle) * triangleLenght;
+    double center_y = end_pin.Pos.y - sin(angle) * triangleLenght;
+
+    ImVec2 a = ImVec2(center_x + triangleLenght * cos(angle + M_PI / 3),
+                      center_y + triangleLenght * sin(angle + M_PI / 3));
+
+    ImVec2 c = ImVec2(center_x + triangleLenght * cos(angle - M_PI / 3),
+                      center_y + triangleLenght * sin(angle - M_PI / 3));
+
+
+    GImNodes->CanvasDrawList->AddTriangleFilled(
+        end_pin.Pos, a, c, link_color);
+
+    DrawLinkSign(cubic_bezier, sign, start_pin, end_pin);    
 }
+
 
 void BeginPinAttribute(
     const int                  id,
@@ -2017,7 +2280,7 @@ bool IsObjectSelected(const ImObjectPool<T>& objects, ImVector<int>& selected_in
 }
 
 } // namespace
-} // namespace IMNODES_NAMESPACE
+ // namespace IMNODES_NAMESPACE
 
 // [SECTION] Internal API implementation
 
@@ -2079,8 +2342,8 @@ ImNodesIO::ImNodesIO()
 }
 
 ImNodesStyle::ImNodesStyle()
-    : GridSpacing(32.f), NodeCornerRounding(4.f), NodePadding(8.f, 8.f), NodeBorderThickness(1.f),
-      LinkThickness(3.f), LinkLineSegmentsPerLength(0.1f), LinkHoverDistance(10.f),
+    : GridSpacing(32.f), NodeCornerRounding(4.f), NodePadding(8.f, 8.f), NodeBorderThickness(1.f), NodeIsCircle(false),
+      LinkThickness(3.f), LinkLineSegmentsPerLength(0.05f), LinkHoverDistance(10.f),
       PinCircleRadius(4.f), PinQuadSideLength(7.f), PinTriangleSideLength(9.5),
       PinLineThickness(1.f), PinHoverRadius(10.f), PinOffset(0.f), MiniMapPadding(8.0f, 8.0f),
       MiniMapOffset(4.0f, 4.0f), Flags(ImNodesStyleFlags_NodeOutline | ImNodesStyleFlags_GridLines),
@@ -2509,15 +2772,72 @@ void EndNodeEditor()
 
     // In order to render the links underneath the nodes, we want to first select the bottom draw
     // channel.
-    GImNodes->CanvasDrawList->ChannelsSetCurrent(0);
+    // GImNodes->CanvasDrawList->ChannelsSetCurrent(0);
 
-    for (int link_idx = 0; link_idx < editor.Links.Pool.size(); ++link_idx)
+    for (int link_idx = 0; link_idx < editor.Links.Pool.size() - 1; ++link_idx)
     {
         if (editor.Links.InUse[link_idx])
         {
-            DrawLink(editor, link_idx);
+            DrawLink(editor, link_idx, editor.Links.Pool[link_idx].Sign);
         }
     }
+
+    if (editor.LinkForNaming.HasValue() &&
+    !ImGui::IsPopupOpen("Name Link") &&
+    !ImGui::IsPopupOpen("SelectLinkSign"))
+    {
+        ImGui::SetNextWindowPos(ImGui::GetMousePos() + ImVec2(10, 10), ImGuiCond_Always);
+        ImGui::OpenPopup("Name Link");
+    }
+
+
+    if (ImGui::BeginPopup("Name Link"))
+    {
+        ImGui::Text("Name Link:");
+        ImGui::SetNextItemWidth(200);
+        //ImGui::SetKeyboardFocusHere();
+        bool enter_pressed = ImGui::InputText(
+            "##linkname", 
+            editor.LinkNameBuffer, 
+            sizeof(editor.LinkNameBuffer),
+            ImGuiInputTextFlags_EnterReturnsTrue);
+        
+        ImGui::Text("Link Sign:");
+
+        const char* items[] = {"None", "Neg (-)", "Pos (+)", "Neg->Pos (- -> +)"};
+        static int item_current = 0;
+        
+        ImGui::Combo(" ", &item_current, items, IM_ARRAYSIZE(items));
+        if (item_current == 0)
+            editor.PendingLinkSign = ImNodesLinkSign_None;
+        else if (item_current == 1)
+            editor.PendingLinkSign = ImNodesLinkSign_Negative;
+        else if (item_current == 2)
+            editor.PendingLinkSign = ImNodesLinkSign_Positive;
+        else if (item_current == 3)
+            editor.PendingLinkSign = ImNodesLinkSign_NegToPos;
+        
+        editor.PendingLinkForSignSelection.Reset();
+
+        if (ImGui::Button("OK") || enter_pressed)
+        {
+            ImLinkData& link = editor.Links.Pool[editor.LinkForNaming.Value()];
+            strncpy(link.Name, editor.LinkNameBuffer, sizeof(link.Name));
+            link.Name[sizeof(link.Name) - 1] = '\0';
+            editor.LinkForNaming.Reset();
+            ImGui::CloseCurrentPopup();
+        } 
+        
+        ImGui::EndPopup();
+    }
+
+    if (editor.Links.Pool.size() >= 1) {
+        int id = editor.Links.Pool.size() - 1;
+        editor.Links.Pool[id].Sign = editor.PendingLinkSign;
+        strncpy(editor.Links.Pool[id].Name, editor.LinkNameBuffer, sizeof(editor.LinkNameBuffer));
+        DrawLink(editor, id, editor.Links.Pool[id].Sign);
+    }
+    
 
     // Render the click interaction UI elements (partial links, box selector) on top of everything
     // else.
@@ -2660,6 +2980,7 @@ void BeginNode(const int node_id)
     node.LayoutStyle.CornerRounding = GImNodes->Style.NodeCornerRounding;
     node.LayoutStyle.Padding = GImNodes->Style.NodePadding;
     node.LayoutStyle.BorderThickness = GImNodes->Style.NodeBorderThickness;
+    node.LayoutStyle.IsCircle = GImNodes->Style.NodeIsCircle;
 
     // Between BeginNodeEditor() and EndNodeEditor() we setup ImGui to work in grid space. So we can
     // use ImGui::SetCursorScreenPos to directly position where our node is supposed to be.
@@ -2689,10 +3010,24 @@ void EndNode()
 
     editor.GridContentBounds.Add(node.Rect);
 
-    if (node.Rect.Contains(GImNodes->MousePos))
-    {
+    bool isHovered = false;
+
+    if (node.LayoutStyle.IsCircle){
+        const float radius = node.Rect.GetWidth() + 5 * 0.5f; 
+        const ImVec2 center = node.Rect.GetCenter(); 
+
+        const float distanceSquared = ImLengthSqr(GImNodes->MousePos - center);
+
+        isHovered = (distanceSquared <= (radius * radius));
+    } else {
+        isHovered = node.Rect.Contains(GImNodes->MousePos);
+    }
+
+    if (isHovered) {
         GImNodes->NodeIndicesOverlappingWithMouse.push_back(GImNodes->CurrentNodeIdx);
     }
+
+    
 }
 
 ImVec2 GetNodeDimensions(int node_id)
@@ -2737,6 +3072,13 @@ void BeginOutputAttribute(const int id, const ImNodesPinShape shape)
 }
 
 void EndOutputAttribute() { EndPinAttribute(); }
+
+void BeginInputOutputAttribute(const int id, const ImNodesPinShape shape)
+{
+    BeginPinAttribute(id, ImNodesAttributeType_InputOutput, shape, GImNodes->CurrentNodeIdx);
+}
+
+void EndInputOutputAttribute() { EndPinAttribute(); }
 
 void BeginStaticAttribute(const int id)
 {
@@ -2791,9 +3133,15 @@ void Link(const int id, const int start_attr_id, const int end_attr_id)
     link.Id = id;
     link.StartPinIdx = ObjectPoolFindOrCreateIndex(editor.Pins, start_attr_id);
     link.EndPinIdx = ObjectPoolFindOrCreateIndex(editor.Pins, end_attr_id);
+    //link.Sign =  editor.PendingLinkSign; 
     link.ColorStyle.Base = GImNodes->Style.Colors[ImNodesCol_Link];
     link.ColorStyle.Hovered = GImNodes->Style.Colors[ImNodesCol_LinkHovered];
     link.ColorStyle.Selected = GImNodes->Style.Colors[ImNodesCol_LinkSelected];
+    
+    if (link.Name[0] == '\0') {
+        link.Name[0] = '\0'; // Só inicialize se for um novo link
+    }
+
 
     // Check if this link was created by the current link event
     if ((editor.ClickInteraction.Type == ImNodesClickInteractionType_LinkCreation &&
@@ -2802,8 +3150,9 @@ void Link(const int id, const int start_attr_id, const int end_attr_id)
          editor.ClickInteraction.LinkCreation.EndPinIdx == link.EndPinIdx) ||
         (editor.ClickInteraction.LinkCreation.StartPinIdx == link.EndPinIdx &&
          editor.ClickInteraction.LinkCreation.EndPinIdx == link.StartPinIdx))
-    {
+    {         
         GImNodes->SnapLinkIdx = ObjectPoolFindOrCreateIndex(editor.Links, id);
+        
     }
 }
 
@@ -2838,6 +3187,8 @@ static const ImNodesStyleVarInfo GStyleVarInfo[] = {
     {ImGuiDataType_Float, 2, (ImU32)IM_OFFSETOF(ImNodesStyle, NodePadding)},
     // ImNodesStyleVar_NodeBorderThickness
     {ImGuiDataType_Float, 1, (ImU32)IM_OFFSETOF(ImNodesStyle, NodeBorderThickness)},
+    // ImNodesStyleVar_NodeIsCircle
+    {ImGuiDataType_U8, 1, (ImU32)IM_OFFSETOF(ImNodesStyle, NodeIsCircle)},
     // ImNodesStyleVar_LinkThickness
     {ImGuiDataType_Float, 1, (ImU32)IM_OFFSETOF(ImNodesStyle, LinkThickness)},
     // ImNodesStyleVar_LinkLineSegmentsPerLength
@@ -2867,6 +3218,19 @@ static const ImNodesStyleVarInfo* GetStyleVarInfo(ImNodesStyleVar idx)
     IM_ASSERT(idx >= 0 && idx < ImNodesStyleVar_COUNT);
     IM_ASSERT(IM_ARRAYSIZE(GStyleVarInfo) == ImNodesStyleVar_COUNT);
     return &GStyleVarInfo[idx];
+}
+
+void PushStyleVar(const ImNodesStyleVar item, const unsigned char value)
+{
+    const ImNodesStyleVarInfo* var_info = GetStyleVarInfo(item);
+    if (var_info->Type == ImGuiDataType_U8 && var_info->Count == 1)
+    {
+        unsigned char& style_var = *(unsigned char*)var_info->GetVarPtr(&GImNodes->Style);
+        GImNodes->StyleModifierStack.push_back(ImNodesStyleVarElement(item, style_var));
+        style_var = value;
+        return;
+    }
+    IM_ASSERT(0 && "Called PushStyleVar() unsigned char variant but variable is not a unsigned char!");
 }
 
 void PushStyleVar(const ImNodesStyleVar item, const float value)
@@ -2915,6 +3279,13 @@ void PopStyleVar(int count)
         }
         count--;
     }
+}
+
+void SetNodeIsCircle(const int node_id, const bool is_circle)
+{
+    ImNodesEditorContext& editor = EditorContextGet();
+    ImNodeData& node = ObjectPoolFindOrCreateObject(editor.Nodes, node_id);
+    node.LayoutStyle.IsCircle = is_circle;
 }
 
 void SetNodeScreenSpacePos(const int node_id, const ImVec2& screen_space_pos)
@@ -3182,11 +3553,19 @@ bool IsLinkCreated(
 
     if (is_created)
     {
-        const ImNodesEditorContext& editor = EditorContextGet();
+         ImNodesEditorContext& editor = EditorContextGet();
         const int                   start_idx = editor.ClickInteraction.LinkCreation.StartPinIdx;
         const int        end_idx = editor.ClickInteraction.LinkCreation.EndPinIdx.Value();
         const ImPinData& start_pin = editor.Pins.Pool[start_idx];
         const ImPinData& end_pin = editor.Pins.Pool[end_idx];
+
+        editor.PendingLinkForSignSelection = editor.Links.Pool.size();
+        
+        if (!editor.LinkForNaming.HasValue()) {
+            editor.LinkForNaming = editor.Links.Pool.size();
+            strncpy(editor.LinkNameBuffer, "", sizeof(editor.LinkNameBuffer));
+        }
+
 
         if (start_pin.Type == ImNodesAttributeType_Output)
         {

@@ -19,6 +19,7 @@ typedef int ImNodesStyleFlags;      // -> enum ImNodesStyleFlags_
 typedef int ImNodesPinShape;        // -> enum ImNodesPinShape_
 typedef int ImNodesAttributeFlags;  // -> enum ImNodesAttributeFlags_
 typedef int ImNodesMiniMapLocation; // -> enum ImNodesMiniMapLocation_
+typedef int ImNodesLinkSign;
 
 enum ImNodesCol_
 {
@@ -59,6 +60,7 @@ enum ImNodesStyleVar_
     ImNodesStyleVar_NodeCornerRounding,
     ImNodesStyleVar_NodePadding,
     ImNodesStyleVar_NodeBorderThickness,
+    ImNodesStyleVar_NodeIsCircle,
     ImNodesStyleVar_LinkThickness,
     ImNodesStyleVar_LinkLineSegmentsPerLength,
     ImNodesStyleVar_LinkHoverDistance,
@@ -153,7 +155,8 @@ struct ImNodesStyle
     float  NodeCornerRounding;
     ImVec2 NodePadding;
     float  NodeBorderThickness;
-
+    unsigned char  NodeIsCircle;
+     
     float LinkThickness;
     float LinkLineSegmentsPerLength;
     float LinkHoverDistance;
@@ -198,6 +201,15 @@ enum ImNodesMiniMapLocation_
     ImNodesMiniMapLocation_BottomRight,
     ImNodesMiniMapLocation_TopLeft,
     ImNodesMiniMapLocation_TopRight,
+};
+
+
+enum ImNodesLinkSign_
+{
+    ImNodesLinkSign_None,          // Sem sinal
+    ImNodesLinkSign_Positive,      // Positivo
+    ImNodesLinkSign_Negative,      // Negativo
+    ImNodesLinkSign_NegToPos,      // Negativo para Positivo
 };
 
 struct ImGuiContext;
@@ -252,6 +264,9 @@ void StyleColorsDark(); // on by default
 void StyleColorsClassic();
 void StyleColorsLight();
 
+//Set the format of node as a circle
+void SetNodeIsCircle(int node_id, bool is_circle);
+
 // The top-level function call. Call this before calling BeginNode/EndNode. Calling this function
 // will result the node editor grid workspace being rendered.
 void BeginNodeEditor();
@@ -268,6 +283,7 @@ void MiniMap(
 // Use PushColorStyle and PopColorStyle to modify ImNodesStyle::Colors mid-frame.
 void PushColorStyle(ImNodesCol item, unsigned int color);
 void PopColorStyle();
+void PushStyleVar(ImNodesStyleVar style_item, const unsigned char value);
 void PushStyleVar(ImNodesStyleVar style_item, float value);
 void PushStyleVar(ImNodesStyleVar style_item, const ImVec2& value);
 void PopStyleVar(int count = 1);
@@ -294,11 +310,16 @@ void EndNodeTitleBar();
 // Each attribute id must be unique.
 
 // Create an input attribute block. The pin is rendered on left side.
+//TO DO: verificar onde é definido o shape
 void BeginInputAttribute(int id, ImNodesPinShape shape = ImNodesPinShape_CircleFilled);
 void EndInputAttribute();
 // Create an output attribute block. The pin is rendered on the right side.
 void BeginOutputAttribute(int id, ImNodesPinShape shape = ImNodesPinShape_CircleFilled);
 void EndOutputAttribute();
+// Create an input+output attribute block. 
+void BeginInputOutputAttribute(int id, ImNodesPinShape shape = ImNodesPinShape_CircleFilled);
+void EndInputOutputAttribute();
+
 // Create a static attribute block. A static attribute has no pin, and therefore can't be linked to
 // anything. However, you can still use IsAttributeActive() and IsAnyAttributeActive() to check for
 // attribute activity.
